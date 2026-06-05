@@ -1,0 +1,95 @@
+#include <WiFi.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Firebase_ESP_Client.h>
+
+// Mobizt Firebase kütüphanesinin gereksinimleri
+#include <addons/TokenHelper.h>
+#include <addons/RTDBHelper.h>
+
+// --- AĞ AYARLARI ---
+const char* ssid = "Ahmet emir's Galaxy A32";
+const char* password = "buyx4990";
+
+// --- FIREBASE BAĞLANTILARI ---
+#define API_KEY "AIzaSyCzli9LUOi3QAilQmDZJWHOkqdFYYyO4Ug" 
+#define DATABASE_URL "https://esp32-proje-final-default-rtdb.europe-west1.firebasedatabase.app"
+
+// --- CIHAZ KİMLİK BİLGİLERİ ---
+#define USER_EMAIL "yusufturhan@example.com"
+#define USER_PASSWORD "Y2001t2883yuky*"
+
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+// --- SENSÖR AYARLARI ---
+const int oneWireBus = 4;
+OneWire oneWire(oneWireBus);
+DallasTemperature sensors(&oneWire);
+
+unsigned long sonZaman = 0;
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  sensors.begin();
+  sensors.setWaitForConversion(false); // Asenkron okuma
+
+  // WİFİ BAĞLANTISI
+  Serial.print("WiFi Bağlantısı kuruluyor: ");
+  WiFi.begin(ssid, password);
+  
+  while (WiFi.status() != WL_CONNECTED) { 
+    delay(500); 
+    Serial.print("."); 
+  }
+  Serial.println("\n[BAŞARILI] WiFi Bağlandı!");
+
+  // FIREBASE CONFIG AYARLARI
+  Serial.printf("Firebase Client v%s\n\n", FIREBASE_CLIENT_VERSION);
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+
+  // Güvenli Giriş Bilgileri Kütüphaneye Atanıyor
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+
+  config.token_status_callback = tokenStatusCallback; // Token oluşturma takibi için
+  
+  // Firebase Bağlantısını Başlat (Arka planda girişi otomatik yönetir)
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+  
+  sensors.requestTemperatures();
+  sonZaman = millis();
+}
+
+void loop() {
+  // 2 saniyede bir veri oku ve Firebase'e gönder
+  if (millis() - sonZaman >= 2000) {
+    float temp = sensors.getTempCByIndex(0);
+    
+    if (temp != -127.00 && temp != DEVICE_DISCONNECTED_C) {
+      Serial.print("Okunan Sıcaklık: ");
+      Serial.print(temp);
+      Serial.println(" °C");
+
+      // Cihaz yetkilendirildi mi ve hazır mı kontrolü
+      if (Firebase.ready()) {
+        // Veriyi güvenli yoldan veritabanına yazıyoruz
+        if (Firebase.RTDB.setFloat(&fbdo, "sensor/anlikSicaklik", temp)) {
+          Serial.println(" -> Güvenli şekilde Firebase'e yazıldı.");
+        } else {
+          Serial.println(" -> Firebase Yazma Hatası: " + fbdo.errorReason());
+        }
+      }
+    } else {
+      Serial.println("HATA: Sensör bağlantısı koptu!");
+    }
+
+    sensors.requestTemperatures();
+    sonZaman = millis();
+  }
+}
